@@ -22,6 +22,33 @@ def generate_bgn_keys(bit_length: int = 256) -> Dict[str, Dict[str, str]]:
 
 
 # ───────────────────── helper: additive encrypt ───────────────────
+
+def _b64_or_json_to_pubkey(raw: str | dict) -> dict:
+    """
+    Accepts:
+      • Base-64 string that decodes to {"n": "..."}
+      • Raw dict {"n": "..."} from JSON
+    Returns -> {"n": "<int-as-str>"}
+    """
+    if isinstance(raw, dict):
+        return raw
+    try:
+        decoded = base64.b64decode(raw).decode()
+        return json.loads(decoded)
+    except Exception:
+        # maybe the caller already sent JSON-text as a string?
+        try:
+            return json.loads(raw)
+        except Exception:
+            raise HTTPException(422, "public_key must be Base64 or JSON with field 'n'")
+
+def _str_to_bool(v: str | bool | None, default=True) -> bool:
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    return v.lower() in {"true", "1", "yes", "y", "t"}
+
 def encrypt_value(m: int, n: int) -> int:
     """BGN-style additive encryption"""
     return m + randint(1, 9_999_999) * n
@@ -72,7 +99,28 @@ def generate_keys(
 
 
 @app.post("/encrypt-string", response_model=EncryptResponse)
-def encrypt_string(req: EncryptRequest):
+async def encrypt_string(
+    # If the caller uses **form-data** these three will be filled:
+    message: str | None = Form(None),
+    public_key: str | None = Form(None),
+    encode: str | None = Form(None),
+    # If the caller sends **JSON** this Pydantic model will be filled:
+    body: EncryptRequest | None = None,
+):
+    """
+    Accepts EITHER:
+      • JSON body matching EncryptRequest
+      • multipart/form-data with fields: message, public_key, encode
+    """
+    if body is None:                     # → form-data path
+        if message is None or public_key is None:
+            raise HTTPException(422, "message and public_key are required")
+        encode_bool = _str_to_bool(encode, default=True)
+        pub_dict = _b64_or_json_to_pubkey(public_key)
+        req = EncryptRequest(message=message, public_key=pub_dict, encode=encode_bool)
+    else:                                # → JSON body path
+        req = body
+
     n = int(req.public_key["n"])
     ct_list = encrypt_text(req.message, n)
 
