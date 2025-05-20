@@ -123,7 +123,9 @@ async def encrypt_string(
     else:             # ── JSON path ──
         req = body
 
-    n = int(req.public_key["n"])
+    n_str = req.public_key.n if isinstance(req.public_key, PubKey) else req.public_key["n"]
+    n = int(n_str)
+    
     ct_list = encrypt_text(req.message, n)
 
     if req.encode:
